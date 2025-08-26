@@ -5,9 +5,10 @@ The simple, yet powerful, status bar for Xorg.
 
 ## Improved Multi-Monitor Workspace Box Handling
 
-This patch enhances **sxbar** so that workspace boxes on each monitor only show windows actually present on that monitor—just like dwmbar.
+This patch enhances **sxbar** so that workspace boxes on each monitor and only show windows actually present on that monitor — like dwmbar.
 
 ### Changes
+- **Added visual workspace window boxes (max 4)** 
 
 - **Per-monitor window counting:**  
   Workspace boxes now only count windows located on the current monitor, instead of showing all windows across all screens.
@@ -19,4 +20,4 @@ This patch enhances **sxbar** so that workspace boxes on each monitor only show 
 ### Result
 
 - Each sxbar instance displays accurate workspace status for its own screen.
-- Workspace boxes are now more informative and reflect the actual window layout on each monitor.
+- Workspace boxes are informative and reflect the window layout on each monitor.
