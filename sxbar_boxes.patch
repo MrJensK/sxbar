@@ -1,0 +1,134 @@
+--- sxbar.c	2025-08-26 19:00:29.330170683 +0200
++++ /home/mrfox/sxbar/src/sxbar.c	2025-08-26 18:50:52.119470570 +0200
+@@ -13,6 +13,7 @@
+ 
+ #include "defs.h"
+ 
++
+ void cleanup_modules(void);
+ void cleanup_resources(void);
+ void create_bars(void);
+@@ -44,6 +45,41 @@
+ int nmonitors = 0;
+ int scr;
+ 
++int window_on_monitor(Window win, int monitor_index) {
++    XWindowAttributes attr;
++    if (!XGetWindowAttributes(dpy, win, &attr))
++        return 0;
++    int mx = monitors[monitor_index].x_org;
++    int my = monitors[monitor_index].y_org;
++    int mw = monitors[monitor_index].width;
++    int mh = monitors[monitor_index].height;
++    // Kontrollera om fönstrets position är inom monitorns rektangel
++    return (attr.x >= mx && attr.x < mx + mw && attr.y >= my && attr.y < my + mh);
++}
++
++int workspace_has_window(int ws) {
++    Atom at = XInternAtom(dpy, "_NET_CLIENT_LIST", False);
++    Atom ret_type;
++    int fmt;
++    unsigned long n, after;
++    unsigned char *data = NULL;
++    if (XGetWindowProperty(dpy, root, at, 0, (~0L), False, XA_WINDOW, &ret_type, &fmt, &n, &after, &data) == Success && data) {
++        Atom ws_atom = XInternAtom(dpy, "_NET_WM_DESKTOP", False);
++        for (unsigned long i = 0; i < n; i++) {
++            Window win = ((Window *)data)[i];
++            unsigned char *ws_data = NULL;
++            if (XGetWindowProperty(dpy, win, ws_atom, 0, 1, False, XA_CARDINAL, &ret_type, &fmt, &n, &after, &ws_data) == Success && ws_data) {
++                int win_ws = *(unsigned long *)ws_data;
++                XFree(ws_data);
++                if (win_ws == ws)
++                    return 1;
++            }
++        }
++        XFree(data);
++    }
++    return 0;
++}
++
+ void cleanup_modules(void)
+ {
+ 	for (int i = 0; i < config.module_count; i++) {
+@@ -196,6 +232,46 @@
+ 				XSetForeground(dpy, gc, config.foreground_colour);
+ 			}
+ 			XDrawString(dpy, draw, gc, pos[i], text_y, tmp, strlen(tmp));
++			
++ 			int max_boxes = 4;
++            int box_size = 5;
++            int box_spacing = 2;
++			int win_count = 0;
++			{
++    		Atom at = XInternAtom(dpy, "_NET_CLIENT_LIST", False);
++    		Atom ret_type;
++    		int fmt;
++    		unsigned long nclients, afterclients;
++    		unsigned char *clients_data = NULL;
++    		if (XGetWindowProperty(dpy, root, at, 0, (~0L), False, XA_WINDOW, &ret_type, &fmt, &nclients, &afterclients, &clients_data) == Success && clients_data) {
++        		Atom ws_atom = XInternAtom(dpy, "_NET_WM_DESKTOP", False);
++        		for (unsigned long j = 0; j < nclients; j++) {
++            		Window win = ((Window *)clients_data)[j];
++            		unsigned long ndesk, afterdesk;
++            		unsigned char *ws_data = NULL;
++            		if (XGetWindowProperty(dpy, win, ws_atom, 0, 1, False, XA_CARDINAL, &ret_type, &fmt, &ndesk, &afterdesk, &ws_data) == Success && ws_data) {
++                		unsigned long win_ws = *(unsigned long *)ws_data;
++                		XFree(ws_data);
++                			if ((int)win_ws == i && window_on_monitor(win, monitor_index))
++                    			win_count++;
++           }
++		        }
++        		XFree(clients_data);
++    		}
++		}		
++            if (win_count > 0) {
++                if (win_count > max_boxes) win_count = max_boxes;
++                // Färg: svart om markerad, annars foreground
++                unsigned long box_col = (i == current_ws) ? parse_col("#000000") : config.foreground_colour;
++                XSetForeground(dpy, gc, box_col);
++                for (int b = 0; b < win_count; b++) {
++                    int box_x = pos[i] - pad + 1 + b * (box_size + box_spacing); // 1 pixel från vänster kant
++					int box_y = text_y - font->ascent - pad + 1; // 1 pixel från toppen
++                    XFillRectangle(dpy, draw, gc, box_x, box_y, box_size, box_size);
++                }
++                // Återställ foreground
++                XSetForeground(dpy, gc, (i == current_ws) ? config.background_colour : config.foreground_colour);
++            }
+ 			free(names[i]);
+ 		}
+ 		free(names);
+@@ -307,7 +383,7 @@
+ 
+ void init_defaults(void)
+ {
+-	config.bottom_bar = True;
++	config.bottom_bar = False;
+ 	config.height = 19;
+ 	config.vertical_padding = 0;
+ 	config.horizontal_padding = 0;
+@@ -363,7 +439,7 @@
+ 	/* volume */
+ 	config.modules[config.module_count++] =
+ 	    (Module){.name = strdup("volume"),
+-	             .command = "amixer get Master | grep -o '[0-9]*%' | head -1 || echo 'N/A'",
++	             .command = "LC_ALL=C wpctl get-volume @DEFAULT_AUDIO_SINK@ 2>/dev/null | awk '/Volume:/ {print $2}' | xargs -I{} bash -c 'echo \"{} * 100 / 1\" | bc | awk \"{print \\$1 \\\"%\\\"}\"'",
+ 	             .enabled = True,
+ 	             .refresh_interval = 5,
+ 	             .last_update = 0,
+@@ -373,7 +449,7 @@
+ 		(Module){.name = strdup("cpu"),
+ 	             .command = "top -bn1 | grep 'Cpu(s)' | sed 's/.*, *\\([0-9.]*\\)%* id.*/\\1/' "
+ 	                        "| awk '{print 100-$1\"%\"}'",
+-	             .enabled = True,
++	             .enabled = False,
+ 	             .refresh_interval = 3,
+ 	             .last_update = 0,
+ 	             .cached_output = NULL};
+@@ -478,6 +554,7 @@
+ 
+ 	init_defaults();
+ 	create_bars();
++	update_modules();
+ }
+ 
+ int main(int ac, char **av)
